@@ -1,0 +1,215 @@
+
+$workingPath = "C:\Users\Steven\Downloads\TestClient\"
+
+# Create an Array to store the destination hosts to ping
+$MAchineIPAddr =  (Test-Connection -ComputerName $env:computername -count 1).ipv4address.IPAddressToString
+$localhost = '127.0.0.1'
+Write-Host $MAchineIPAddr $localhost
+#[Array] $PingHosts = "172.25.204.11","127.0.0.1"
+[Array] $PingHosts = $MAchineIPAddr,$localhost
+$HostsTitles = @(("208.67.222.222", "DSL"), ("208.67.220.220", "HSA"), ("127.0.0.1", "Firewall "), ("192.168.1.1", "Fortigate"), ("127.0.0.1", "Switch "), ("192.168.1.2", "Cisco 2900-01"), ("192.168.1.3", "Cisco 2900-02") )
+
+# Initialize body (This is the very top section header)
+$body = "<b>WAN</b><br>";
+
+# Create counter
+$counter = 0;
+
+#Error counter
+$passerrorcounter = 0;
+$errorcounter = 0;
+
+# Error variables
+$PingFailure = "false";
+$NewPingFailure = "false";
+
+# Fixed variable
+$PingFixed = "false";
+
+# Start subject
+$subject = "";
+$Fixedsubject = "";
+
+# Run Get-WmiObject using the Win32_PingStatus class against every host in the Array
+$WmiPingStatus = {Get-WmiObject -Class Win32_PingStatus -Filter ("Address='" + $_ + "'") -ComputerName .}
+$PingHosts | ForEach-Object -Process $WmiPingStatus | Select-Object -Property Address,StatusCode |
+foreach {
+	#These are the various section headings for what is being ping checked.
+	#Add more -Or $HostsTitles[$counter][1] -match "Switch " for the various section headings you would like to use.
+	If ($HostsTitles[$counter][1] -match "Firewall " -Or $HostsTitles[$counter][1] -match "Switch " -Or $HostsTitles[$counter][1] -match "Servers " -Or $HostsTitles[$counter][1] -match "Printers " -Or $HostsTitles[$counter][1] -match "Label Printers " -Or $HostsTitles[$counter][1] -match "Wireless ROuters " -Or $HostsTitles[$counter][1] -match "IP Power ")
+	{
+		$body =  $body + "<br><b>" + $HostsTitles[$counter][1] + "</b><br>";
+	}
+	else
+	{
+		
+		# Get hostname
+		$hostname = [System.Net.Dns]::GetHostbyAddress($_.Address)
+		$tempHostName = $hostname.HostName.ToLower()
+
+		# Create failure tracking path for this device
+		$path = $workingPath +"\" +  $tempHostName.Replace(".yourdomain.local","") + ".txt";
+
+		# If StatusCode is equal to 0 then do nothing (since 0 = success)
+		If ($_.StatusCode -eq 0)
+		{
+
+			# Check to see if there is a failure file for this, if so then it has now come back online, highlight accordingly
+			if (Test-Path $path)
+			{
+
+				# See how long device was down for
+				$str = Get-Content $path;
+				$i = [System.Decimal]::Parse($str);
+				$i=$i*5;
+
+				# There was previously a failure but now online. Mark green to show this in the e-mail.
+				$body =  $body + "<b><font color=""green"">" + $HostsTitles[$counter][1] + " (" + $_.Address + " | " + $tempHostName.Replace(".yourdomain.local","") + " | " + $i + " minutes)</font></b><br>"
+
+				# Since there is no longer a failure, delete the tracking file
+				Remove-Item $path;
+
+				# Set variable so that we know something is fixed
+				$PingFixed = "true";
+
+				if ($passerrorcounter -eq 0)
+				{
+					$Fixedsubject = $Fixedsubject + $tempHostName.Replace(".yourdomain.local","");
+				}
+				else
+				{
+					$Fixedsubject = $Fixedsubject + ", " + $tempHostName.Replace(".yourdomain.local","");	
+				}
+
+				$passerrorcounter = 1;
+
+			} 
+			else
+			{
+				# There was no previous failure
+				$body =  $body + $HostsTitles[$counter][1] + " (" + $_.Address + " | " + $tempHostName.Replace(".yourdomain.local","") + ")<br>"
+			} 
+			
+		
+		}
+		# Else, if StatusCode is NOT equal to 0 then do something
+		Else
+		{
+			# Set e-mail subject and body using details of non-responsive host
+
+			if(Test-Connection -computer $_.Address -quiet)
+			{
+				$PingWarning = "true";
+
+				if (Test-Path $path)
+				{
+					# See how long device was down for
+					$str = Get-Content $path;
+					$i = [System.Decimal]::Parse($str);
+					$i=$i*5;
+	
+					# There was previously a failure
+					$body =  $body + "<b><font color=""orange"">" + $HostsTitles[$counter][1] + " (" + $_.Address + " | " + $tempHostName.Replace(".yourdomain.local","") + " | " + $i + " minutes)</font></b><br>"
+
+					# Since there is no longer a failure, delete the file
+					Remove-Item $path;
+
+					# Set variable so that we know something is fixed
+					$PingFixed = "true";
+	
+					if ($passerrorcounter -eq 0)
+					{
+						$Fixedsubject = $Fixedsubject + $tempHostName.Replace(".yourdomain.local","");
+					}
+					else
+					{
+						$Fixedsubject = $Fixedsubject + ", " + $tempHostName.Replace(".yourdomain.local","");	
+					}
+		
+					$passerrorcounter = 1;
+				} 
+				else 
+				{
+					# There was NOT previously a failure
+					$body =  $body + "<b><font color=""orange"">" + $HostsTitles[$counter][1] + " (" + $_.Address + " | " + $tempHostName.Replace(".yourdomain.local","") + ")</font></b><br>"
+				
+				}
+
+			}
+			else
+			{
+				
+				# Check to see if there is a failure file for this, failure is continuing so increment it
+				if (Test-Path $path)
+				{	
+
+					# See how long device was down for
+					$str = Get-Content $path;
+					$i = [System.Decimal]::Parse($str);
+					$i=$i*5;
+
+					# There was previously a failure
+					$OldPingFailure = "true";
+					$body =  $body + "<b><font color=""red"">" + $HostsTitles[$counter][1] + " (" + $_.Address + " | " + $tempHostName.Replace(".yourdomain.local","") + " | " + $i + " minutes)</font></b><br>"	
+
+
+					# Increase failure file integer
+					$str = Get-Content $path;
+					$i = [System.Decimal]::Parse($str)
+					$i++
+					Set-Content $path $i
+
+				} 
+				else
+				{
+					# There was no previous failure, this is a new failure. Must mark for e-mail to be sent.
+					$NewPingFailure = "true";
+					$body =  $body + "<b><font color=""red"">" + $HostsTitles[$counter][1] + " (" + $_.Address + " | " + $tempHostName.Replace(".yourdomain.local","") + " | 0 to 5 minutes)</font></b><br>"	
+	
+					# Create a failure file
+					$text = '1';
+					$text | Out-File $path;
+					$text > $path;
+				} 
+
+			}
+
+			$errorcounter = 1;
+		}
+	}
+	$counter = $counter+1;
+}
+
+# Set e-mail objects and send e-mail
+If($NewPingFailure -match "true" -Or $OldPingFailure -match "true")
+{
+	If($NewPingFailure -match "true")
+	{
+		#New device failure. Send notification e-mail.		
+
+		$body | Add-Content 'C:\Users\Steven\Downloads\TestClient\errortest.txt'
+	}
+	else
+	{
+		$body | Add-Content 'C:\Users\Steven\Downloads\TestClient\test.txt'
+	}
+
+}
+else
+{
+	if($PingFixed -match "true")
+	{
+		#A device that was down is now up. Send an e-mail to notify.		
+		$body | Add-Content 'C:\Users\Steven\Downloads\TestClient\pingerrortest.txt'
+	}
+	else
+	{
+		$body | Add-Content 'C:\Users\Steven\Downloads\TestClient\pingtest.txt'
+	}
+# There are no failures.
+# Double check to make sure failure folder is emptied.
+#Remove-Item $workingPath*
+}
+
+
+Exit
