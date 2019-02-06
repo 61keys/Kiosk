@@ -1,0 +1,7 @@
+$timestamp = Get-Date -f yyyy-MM-dd_HH-mm-ss
+New-NetEventSession -Name Session1 -LocalFilePath c:\Users\Steven\Downloads\TestClient\$env:computername-netcap-$timestamp.etl -MaxFileSize 512
+Add-NetEventPacketCaptureProvider -SessionName Session1
+Start-NetEventSession -Name Session1
+Get-NetEventSession
+#Stop-NetEventSession -Name Session1
+#Remove-NetEventSession -Name Session1 
