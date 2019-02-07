@@ -1,0 +1,3 @@
+Get-NetEventSession
+Stop-NetEventSession -Name Session1
+Remove-NetEventSession -Name Session1 
